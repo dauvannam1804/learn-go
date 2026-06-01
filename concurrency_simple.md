@@ -275,37 +275,33 @@ The system might sell the single seat to both, or crash, depending on whose requ
 
 A **Deadlock** happens when two or more tasks are waiting for each other, and because nobody moves, the entire program is **stuck forever**.
 
-#### 🍳 Real-world Example: Narrow Bridge
-Two cars meet head-to-head on a one-lane bridge. Neither driver is willing to back up. Both cars sit there forever.
+#### 🍳 Real-world Example: Two Kids Drawing
+Two kids (Alice and Bob) want to draw. To draw, a kid needs **both** a **sheet of paper** and a **crayon**. There is only **one sheet of paper** and **one crayon** on the table. Alice grabs the crayon, and Bob grabs the paper. Neither wants to share or let go. Both kids sit there forever, unable to draw.
 
 #### 🔒 The 4 Coffman Conditions (Why Deadlocks Happen)
-For a deadlock to occur, **all four** of these conditions must be true at the same time. Let's explain them using the **Narrow Bridge** example (with **Car 1** and **Car 2** meeting in the middle of a one-lane bridge):
+For a deadlock to occur, **all four** of these conditions must be true at the same time. Let's explain them using the **Two Kids Drawing** example:
 
 1.  **Mutual Exclusion (Only One User):** 
     *   *What it means:* A resource can only be held by one process at a time.
-    *   *Bridge Analogy:* The bridge is so narrow that **only one car can occupy a single spot** on it. Car 1 and Car 2 cannot merge into the exact same physical space.
-    ![mutual-exclusion](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/concurrency/mutual-exclusion.png)
+    *   *Drawing Analogy:* The paper and crayon are exclusive resources. Only one kid can hold the crayon at a time, and only one kid can write on the paper at a time. They cannot share them simultaneously.
 
 2.  **Hold and Wait (Keeping what you have while waiting):** 
     *   *What it means:* A process holds onto its current resource while waiting to get another resource.
-    *   *Bridge Analogy:* 
-        *   **Car 1** drives onto the left side of the bridge. It holds its spot (**Hold**) and waits for the right side to clear (**Wait**).
-        *   **Car 2** drives onto the right side of the bridge. It holds its spot (**Hold**) and waits for the left side to clear (**Wait**).
-        *   Neither car is willing to back off the bridge to let the other pass.
-    ![hold-and-wait](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/concurrency/hold-and-wait.png)
+    *   *Drawing Analogy:* 
+        *   **Alice** holds the crayon (**Hold**) and waits for the paper (**Wait**).
+        *   **Bob** holds the paper (**Hold**) and waits for the crayon (**Wait**).
+        *   Neither kid is willing to release what they are holding until they get the other item.
 
 3.  **No Preemption (No Stealing):** 
     *   *What it means:* A resource cannot be taken away from a process by force; it must be released voluntarily.
-    *   *Bridge Analogy:* Driver 1 **cannot force** Driver 2 to back up or tow their car away. The car will only move if Driver 2 decides to put it in reverse voluntarily.
-    ![no-preemption](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/concurrency/no-preemption.png)
+    *   *Drawing Analogy:* Alice **cannot force** Bob to hand over the paper, and Bob **cannot force** Alice to hand over the crayon. They can only get the other resource if the other kid decides to put it down voluntarily.
 
 4.  **Circular Wait (Waiting in a Loop):** 
     *   *What it means:* Process A is waiting for B, which is waiting for A (forming a circle).
-    *   *Bridge Analogy:* 
-        *   **Car 1** cannot go forward because **Car 2** is blocking the lane. (Car 1 is waiting for Car 2).
-        *   **Car 2** cannot go forward because **Car 1** is blocking the lane. (Car 2 is waiting for Car 1).
-        *   Both cars are waiting for each other in a closed loop, so nobody moves.
-    ![circular-wait](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/concurrency/circular-wait.png)
+    *   *Drawing Analogy:* 
+        *   **Alice** is waiting for **Bob** to give her the paper.
+        *   **Bob** is waiting for **Alice** to give him the crayon.
+        *   They are waiting for each other in a closed loop (Alice -> Bob -> Alice), so nobody moves.
 
 ---
 
@@ -327,4 +323,121 @@ You are walking down a hallway and meet someone walking the opposite way.
 
 #### 🍳 Real-world Example: Busy Buffet
 You are waiting in line at a buffet to get food, but greedy people keep cutting in front of you. Because the line never ends and people keep cutting, you never get any food and go hungry.
+
+---
+
+## 5. Goroutines
+
+In this lesson, we will learn about Goroutines.
+
+> *"Don't communicate by sharing memory, share memory by communicating."* — Rob Pike
+
+#### 💡 What does this mean?
+*   **Old way (Sharing Memory):** Imagine two coworkers trying to write notes on the **same page of a single notebook** at the exact same time. To avoid writing over each other, they must lock and unlock the notebook. If they make a mistake, their notes get ruined (Data Race) or they freeze waiting for the lock (Deadlock).
+*   **Go way (Communicating):** The two coworkers sit in **separate rooms**, each having their own notebook. When one coworker wants to share data, they write it on a slip of paper, put it in a **pneumatic tube (Channel)**, and send it to the other room. The receiver reads the paper and writes it down in their own notebook. No locks are needed!
+
+### What is a Goroutine?
+A **goroutine** is a lightweight thread of execution that is managed by the Go runtime and essentially lets us write asynchronous code in a synchronous manner.
+
+#### 💡 What does "asynchronous code in a synchronous manner" mean?
+Normally, when we write asynchronous code (like fetching data from a database or calling an API) in other languages, we have to use complicated structures like **callbacks**, **Promises**, or **async/await** to handle waiting.
+
+In Go, **you just write code normally, from top to bottom (synchronous style)**. Behind the scenes, the Go runtime does all the magic: if your code has to wait for something (like waiting for a channel or network), Go pauses the Goroutine, works on other things, and wakes it up when it's ready. You get the speed of asynchronous code, but the simplicity of normal synchronous code!
+
+Let's look at how this compares:
+
+*   **Python (Asynchronous syntax):**
+    ```python
+    # We must explicitly mark functions as async and use the "await" keyword
+    async def main():
+        result = await fetch_data()
+        print(result)
+    ```
+*   **Go (Synchronous syntax, but runs asynchronously under the hood):**
+    ```go
+    // This looks like simple, step-by-step code, but Go runs it asynchronously!
+    result := fetchData() // If this blocks, Go automatically pauses this goroutine and runs others
+    fmt.Println(result)
+    ```
+
+It is important to know that **they are not actual OS threads**, and the **main function itself runs as a goroutine**.
+
+### 🍳 Real-world Example: Hiring Assistants
+Imagine you are running a company:
+*   **Operating System Thread:** Hiring a full-time, expensive manager. They need a big dedicated desk/office (large memory stack, e.g., 1MB+), take a lot of time and resources to set up, and are slow to hire. If you need to handle 10,000 tasks, you cannot afford to hire 10,000 managers.
+*   **Goroutine:** Hiring part-time virtual assistants (VAs). They work from home, need almost zero desk space (starts at only 2KB of memory), and you can spin up 100,000 of them instantly. The Go runtime scheduler acts as the CEO, mapping these thousands of virtual assistants onto a few managers.
+
+### 🚀 How they work: Cooperative Scheduling
+A single thread may run thousands of goroutines in them by using the **Go runtime scheduler** which uses **cooperative scheduling**. 
+
+This implies that if the current goroutine is blocked (e.g., waiting for network, disk, or a channel) or has been completed, the scheduler will automatically move the other waiting goroutines to another active OS thread. Hence, we achieve high efficiency in scheduling where no routine is blocked forever.
+
+### 🔱 The Fork-Join Model
+Before we write any code, it is important to briefly discuss the **Fork-Join Model**.
+
+Go's concurrency follows this model, which consists of two phases:
+1.  **Fork:** At some point, the main flow of execution splits (forks) to run a task concurrently in the background. In Go, we do this using the `go` keyword.
+2.  **Join:** At a later point, these concurrent tasks join back with the main flow of execution. Without a join point, the main program might finish and exit before the background task even has a chance to start!
+
+```mermaid
+graph TD
+    Start[Main Goroutine Starts] --> Fork{Fork: go printMessage}
+    Fork -->|Concurrently| MainRun[Main Goroutine Continues]
+    Fork -->|Concurrently| ChildRun[Child Goroutine Runs]
+    MainRun --> Join[Join Point: Wait for Child]
+    ChildRun --> Join
+    Join --> End[Program Finishes]
+```
+
+### 💻 How to use a Goroutine
+We can turn any function into a goroutine by simply using the `go` keyword:
+
+```go
+go fn(x, y, z)
+```
+
+Here is a simple Go program demonstrating the Fork-Join model using a basic `time.Sleep` as our temporary join point:
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+// This function runs synchronously inside its own goroutine.
+// We write it line-by-line, but Go can pause/resume it asynchronously!
+func printMessage(message string) {
+	for i := 1; i <= 3; i++ {
+		fmt.Println(message, i)
+		// When time.Sleep is called, Go does not block the entire CPU thread.
+		// Instead, it pauses (blocks) this specific goroutine and lets other goroutines run.
+		time.Sleep(100 * time.Millisecond) 
+	}
+}
+
+func main() {
+	// 1. FORK: Start printMessage as a new Goroutine in the background.
+	// This starts asynchronously, but the code inside printMessage is written synchronously!
+	go printMessage("Running in background...")
+
+	// Run printMessage in the main Goroutine.
+	// Because of the 'go' keyword above, the main thread doesn't wait;
+	// it immediately starts executing this line concurrently.
+	printMessage("Running in main thread...")
+
+	// 2. JOIN: Wait for the background Goroutine to finish before main exits.
+	// (If we remove this Sleep, the program exits immediately without printing the background task!)
+	time.Sleep(500 * time.Millisecond)
+	fmt.Println("Done!")
+}
+```
+
+#### 🔍 What happens in the code:
+*   `go printMessage("Running in background...")` forks the execution. Go runs this function concurrently and immediately moves to the next line of `main`.
+*   The main thread continues executing `printMessage("Running in main thread...")`.
+*   We use `time.Sleep(500 * time.Millisecond)` as a simple **Join** point to keep the main goroutine alive so the background goroutine can finish its work.
+
+
 
