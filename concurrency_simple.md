@@ -362,15 +362,74 @@ Let's look at how this compares:
 
 It is important to know that **they are not actual OS threads**, and the **main function itself runs as a goroutine**.
 
-### 🍳 Real-world Example: Hiring Assistants
-Imagine you are running a company:
-*   **Operating System Thread:** Hiring a full-time, expensive manager. They need a big dedicated desk/office (large memory stack, e.g., 1MB+), take a lot of time and resources to set up, and are slow to hire. If you need to handle 10,000 tasks, you cannot afford to hire 10,000 managers.
-*   **Goroutine:** Hiring part-time virtual assistants (VAs). They work from home, need almost zero desk space (starts at only 2KB of memory), and you can spin up 100,000 of them instantly. The Go runtime scheduler acts as the CEO, mapping these thousands of virtual assistants onto a few managers.
+### 🍳 Real-world Example: The Restaurant Kitchen
+Imagine you are running a busy restaurant:
 
-### 🚀 How they work: Cooperative Scheduling
-A single thread may run thousands of goroutines in them by using the **Go runtime scheduler** which uses **cooperative scheduling**. 
+| Concept / Component | Restaurant Analogy | Go Runtime Reality |
+| :--- | :--- | :--- |
+| **Active Worker** | **Chef** (Expensive to hire, needs physical kitchen space, tools) | **OS Thread** (Expensive to create, requires ~1MB+ memory stack, limited by CPU cores) |
+| **Unit of Work** | **Order Slip** (Cheap piece of paper, ~2KB-equivalent space, contains instructions and current state) | **Goroutine** (Lightweight thread, starts at only ~2KB stack size, contains call stack and program counter) |
+| **Scale / Limit** | **100,000 orders** can easily sit on the counter, but you cannot fit 100,000 chefs in the kitchen. | **100,000+ goroutines** can run concurrently, but you cannot spawn 100,000 OS threads without crashing. |
+| **Scheduler** | **Kitchen Manager** (Assigns order slips to available chefs) | **Go Runtime Scheduler** (Maps thousands of goroutines onto a few active OS threads) |
+| **I/O Blocking** | **Waiting for water to boil** (Chef doesn't stand idle; they put the order slip on hold and start chopping veggies for another order) | **Waiting for network/disk/channel** (Go runtime pauses the goroutine, frees the OS thread to execute other goroutines) |
+| **Context Switch** | **Picking up a different order slip** (Extremely fast, just read the next piece of paper) | **Switching Goroutines** (Very fast, ~10-100ns, done entirely in user space without OS intervention) |
 
-This implies that if the current goroutine is blocked (e.g., waiting for network, disk, or a channel) or has been completed, the scheduler will automatically move the other waiting goroutines to another active OS thread. Hence, we achieve high efficiency in scheduling where no routine is blocked forever.
+
+### 🚀 How they work: Cooperative & Asynchronous Scheduling
+A single thread may run thousands of goroutines in them by using the **Go runtime scheduler**.
+
+This implies that if the current goroutine is blocked or has been completed, the scheduler will automatically ensure other waiting goroutines keep running without being blocked.
+
+Here is how the Go Scheduler handles blocking depending on the type of operation:
+
+#### Scenario A: Blocking on User-space events (e.g., Channels, Network I/O, Mutexes)
+The OS Thread does **not** block. The Go scheduler simply pauses the active Goroutine and swaps it out for another one.
+
+```text
+[Normal State]
+┌────────────────┐     ┌──────────────┐
+│ OS Thread (M)  │ ◄── │ Go Scheduler │ ◄── [ Run Queue: G2, G3 ]
+└───────┬────────┘     └──────────────┘
+        │ (Executing)
+        ▼
+     ┌──────┐
+     │  G1  │ (Active)
+     └──────┘
+
+[G1 Blocks on Channel/Network -> Scheduler swaps in G2]
+┌────────────────┐     ┌──────────────┐
+│ OS Thread (M)  │ ◄── │ Go Scheduler │ ◄── [ Run Queue: G3 ]
+└───────┬────────┘     └───────┬──────┘
+        │ (Swaps in)           │ (Puts on hold / Netpoller)
+        ▼                      ▼
+     ┌──────┐               ┌──────┐
+     │  G2  │ (Active)      │  G1  │ (Waiting / Suspended)
+     └──────┘               └──────┘
+```
+
+#### Scenario B: Blocking on Kernel-space events (e.g., File I/O, System Calls)
+The OS Thread (M1) gets blocked by the Operating System. The Go Scheduler detaches the remaining queue and moves them to a new/free OS Thread (M2) so they can keep running.
+
+```text
+[G1 starts a heavy File Read -> Thread M1 is blocked by the OS kernel]
+┌────────────────┐
+│ OS Thread (M1) │ ◄── G1 (Reading File)
+└───────┬────────┘
+        │ (BLOCKED by Kernel)
+        ▼
+     (Stuck)
+
+[Scheduler detaches the queue and moves it to a fresh Thread M2]
+┌────────────────┐     ┌──────────────┐
+│ OS Thread (M2) │ ◄── │ Go Scheduler │ ◄── [ Run Queue: G2, G3 ]
+└───────┬────────┘     └──────────────┘
+        │ (Continues executing remaining tasks)
+        ▼
+     ┌──────┐
+     │  G2  │ (Active)
+     └──────┘
+```
+
 
 ### 🔱 The Fork-Join Model
 Before we write any code, it is important to briefly discuss the **Fork-Join Model**.
@@ -379,15 +438,8 @@ Go's concurrency follows this model, which consists of two phases:
 1.  **Fork:** At some point, the main flow of execution splits (forks) to run a task concurrently in the background. In Go, we do this using the `go` keyword.
 2.  **Join:** At a later point, these concurrent tasks join back with the main flow of execution. Without a join point, the main program might finish and exit before the background task even has a chance to start!
 
-```mermaid
-graph TD
-    Start[Main Goroutine Starts] --> Fork{Fork: go printMessage}
-    Fork -->|Concurrently| MainRun[Main Goroutine Continues]
-    Fork -->|Concurrently| ChildRun[Child Goroutine Runs]
-    MainRun --> Join[Join Point: Wait for Child]
-    ChildRun --> Join
-    Join --> End[Program Finishes]
-```
+![fork-join](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/goroutines/fork-join.png)
+
 
 ### 💻 How to use a Goroutine
 We can turn any function into a goroutine by simply using the `go` keyword:
@@ -434,10 +486,306 @@ func main() {
 }
 ```
 
+Output:
+```
+Running in main thread... 1
+Running in background... 1
+Running in main thread... 2
+Running in background... 2
+Running in background... 3
+Running in main thread... 3
+Done!
+```
+
 #### 🔍 What happens in the code:
 *   `go printMessage("Running in background...")` forks the execution. Go runs this function concurrently and immediately moves to the next line of `main`.
 *   The main thread continues executing `printMessage("Running in main thread...")`.
 *   We use `time.Sleep(500 * time.Millisecond)` as a simple **Join** point to keep the main goroutine alive so the background goroutine can finish its work.
+
+---
+
+## 6. Channels
+
+In this section, we will explore **Channels**—the pipes that connect concurrent Goroutines. They allow Goroutines to send and receive values to and from each other, serving as both a communication medium and a synchronization tool.
+
+![channel](https://raw.githubusercontent.com/karanpratapsingh/portfolio/master/public/static/courses/go/chapter-IV/channels/channel.png)
+
+---
+
+### 🚇 What is a Channel?
+A **channel** is a typed conduit through which you can send and receive values with the channel operator, `<-`. 
+
+#### 💡 The Pneumatic Tube Analogy
+Imagine two offices connected by a **pneumatic tube**:
+*   To send a message, you put it in a capsule and push it into the tube (`ch <- value`).
+*   To receive a message, you wait at the other end and pull the capsule out (`value := <-ch`).
+*   The tube ensures the message travels safely from one office (Goroutine) to the other without anyone else grabbing it.
+
+---
+
+### 🛠️ Declaring and Initializing Channels
+Like maps and slices, channels must be created using the built-in `make` function before they can be used:
+
+```go
+// Declaring a channel that can only transport integers
+var ch chan int
+
+// Initializing the channel
+ch = make(chan int)
+
+// Or in a single line:
+ch := make(chan int)
+```
+
+> [!WARNING]
+> Sending to or receiving from a `nil` channel (a channel that has been declared but not initialized with `make`) will **block forever**, leading to a deadlock.
+
+---
+
+### 🚦 Unbuffered vs. 📦 Buffered Channels
+
+Go provides two types of channels: **Unbuffered** and **Buffered**. They differ in how they block and synchronize.
+
+| Feature | Unbuffered Channel (`make(chan T)`) | Buffered Channel (`make(chan T, capacity)`) |
+| :--- | :--- | :--- |
+| **Capacity** | `0` (or not specified) | `> 0` (e.g., `make(chan int, 3)`) |
+| **Blocking Behavior** | **Sends** block until a receiver is ready.<br>**Receives** block until a sender is ready. | **Sends** only block when the buffer is **full**.<br>**Receives** only block when the buffer is **empty**. |
+| **Synchronization** | **Guaranteed sync**: Both goroutines handshake at the exact same moment. | **Decoupled**: Sender can continue working until the buffer fills up. |
+| **Real-world Analogy** | **Relay Baton**: The runner cannot let go of the baton until the next runner grabs it. | **Mailbox**: You can drop off mail even if the recipient is asleep, until the mailbox is full. |
+
+#### 1. Unbuffered Channels (Relay Baton)
+An unbuffered channel requires both the sender and receiver to be ready at the same time. If one side is not ready, the other side blocks and waits.
+
+##### 💻 Go Code Example:
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func worker(ch chan string) {
+	fmt.Println("[Worker] Working on task...")
+	time.Sleep(2 * time.Second)
+	
+	fmt.Println("[Worker] Sending result to channel... (Will block if main is not ready)")
+	ch <- "Task Completed!" // Blocks here until main reads from ch
+	fmt.Println("[Worker] Result sent! Worker released.")
+}
+
+func main() {
+	ch := make(chan string) // Unbuffered channel
+
+	go worker(ch)
+
+	time.Sleep(1 * time.Second) // Main sleeps for 1 second
+	fmt.Println("[Main] Ready to receive result... (Reading from channel)")
+	
+	result := <-ch // Main receives from ch. This unblocks the worker!
+	fmt.Println("[Main] Received:", result)
+}
+```
+
+##### 🔍 How the code runs step-by-step:
+1. `go worker(ch)` starts running. It sleeps for 2 seconds.
+2. In the meantime, `main` sleeps for 1 second, then reaches `result := <-ch`. Because the worker is still sleeping and hasn't sent anything, `main` **blocks (turns Pink)**.
+3. At second 2, `worker` wakes up and calls `ch <- "Task Completed!"`.
+4. The handshake occurs immediately: `main` receives the data and unblocks, and `worker` is also released to print `"Worker released."`.
+
+---
+
+#### 2. Buffered Channels (Mailbox)
+A buffered channel has a queue of a fixed size. Sends are non-blocking as long as there is room in the buffer. Receives are non-blocking as long as there is at least one item in the buffer.
+
+##### 💻 Go Code Example:
+```go
+package main
+
+import "fmt"
+
+func main() {
+	// Create a buffered channel with a capacity of 2
+	ch := make(chan string, 2)
+
+	// These sends are non-blocking because the buffer is not full yet
+	ch <- "Message 1"
+	ch <- "Message 2"
+	fmt.Println("Sent 2 messages to buffer without blocking!")
+
+	// The third send would block because the capacity is 2 and buffer is full!
+	// ch <- "Message 3" // Uncommenting this without a receiver in a goroutine causes deadlock!
+
+	// Receives are non-blocking because there is data in the buffer
+	fmt.Println("Received:", <-ch)
+	fmt.Println("Received:", <-ch)
+}
+```
+
+---
+
+### 🔌 Closing Channels & 🔄 Ranging over Channels
+
+When a sender is finished sending data, it can **close** the channel to signal to the receiver that no more values will be sent.
+
+#### 💡 The Rule of Closing
+*   **Only the sender should close a channel**, never the receiver. Sending to a closed channel will cause a **panic**.
+*   Closing a channel is **not required** unless you need to signal to the receiver that no more data is coming (e.g., to terminate a loop).
+
+#### 🔄 Using `range` to read until Closed
+You can use a `for range` loop to read values from a channel until it is closed. The loop automatically exits when the channel is closed and all remaining buffered data is read.
+
+##### 💻 Go Code Example:
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func producer(ch chan int) {
+	for i := 1; i <= 3; i++ {
+		ch <- i
+		time.Sleep(500 * time.Millisecond)
+	}
+	fmt.Println("[Producer] All items sent. Closing channel...")
+	close(ch) // Close the channel to tell the receiver to stop waiting
+}
+
+func main() {
+	ch := make(chan int)
+
+	go producer(ch)
+
+	// The range loop automatically reads from the channel
+	// and exits when the channel is closed.
+	fmt.Println("[Receiver] Waiting for items...")
+	for num := range ch {
+		fmt.Printf("[Receiver] Got: %d\n", num)
+	}
+	fmt.Println("[Receiver] Channel closed! Done.")
+}
+```
+
+#### 🛡️ Checking if a Channel is Closed (`ok` idiom)
+You can also detect whether a channel has been closed by assigning a second boolean variable to the receive operation:
+
+```go
+val, ok := <-ch
+```
+*   `ok` is `true`: The value was successfully received from the channel.
+*   `ok` is `false`: The channel has been closed and there are no more values left to receive. Any further reads will return the **zero value** of the channel's type immediately without blocking.
+
+---
+
+### 🏹 Channel Direction (Directional Channels)
+
+When using channels as function arguments, you can specify if a channel is meant only to **send** or only to **receive** data. This adds compile-time type safety.
+
+*   `chan T`: Bidirectional channel (can send and receive).
+*   `chan<- T`: **Send-only** channel (write-only).
+*   `<-chan T`: **Receive-only** channel (read-only).
+
+##### 💻 Go Code Example:
+```go
+package main
+
+import "fmt"
+
+// ping only accepts a channel for sending (write-only)
+func ping(pings chan<- string, msg string) {
+	pings <- msg
+}
+
+// pong accepts a receive-only channel (pings) and a send-only channel (pongs)
+func pong(pings <-chan string, pongs chan<- string) {
+	msg := <-pings
+	pongs <- msg
+}
+
+func main() {
+	pings := make(chan string, 1)
+	pongs := make(chan string, 1)
+
+	ping(pings, "passed message")
+	pong(pings, pongs)
+
+	fmt.Println("Result:", <-pongs)
+}
+```
+
+---
+
+### 🔀 The `select` Statement
+
+The `select` statement lets a Goroutine wait on multiple communication operations. It's like a `switch` statement, but for channels.
+
+*   `select` blocks until **one** of its cases can run.
+*   If multiple cases are ready, it picks one **randomly**.
+*   A `default` case can be used to perform a **non-blocking** send or receive.
+
+##### 💻 Go Code Example: Multiplexing Channels
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func server1(ch chan string) {
+	time.Sleep(2 * time.Second)
+	ch <- "Response from Server 1"
+}
+
+func server2(ch chan string) {
+	time.Sleep(1 * time.Second)
+	ch <- "Response from Server 2"
+}
+
+func main() {
+	ch1 := make(chan string)
+	ch2 := make(chan string)
+
+	go server1(ch1)
+	go server2(ch2)
+
+	// Wait for whichever server responds first
+	for i := 0; i < 2; i++ {
+		select {
+		case s1 := <-ch1:
+			fmt.Println("Received from server 1:", s1)
+		case s2 := <-ch2:
+			fmt.Println("Received from server 2:", s2)
+		}
+	}
+}
+```
+
+##### ⏱️ Implementing timeouts using `select`
+You can prevent a program from hanging forever by using `time.After` to set a timeout:
+
+```go
+select {
+case res := <-ch1:
+    fmt.Println("Got response:", res)
+case <-time.After(1 * time.Second): // Fires after 1 second
+    fmt.Println("Timeout! Server took too long.")
+}
+```
+
+---
+
+### ⚠️ Common Channel Gotchas & Mistakes
+Be extremely careful to avoid these situations, which can lead to panic or runtime deadlocks:
+
+1.  **Sending to a closed channel** -> **PANIC!**
+2.  **Closing a closed channel** -> **PANIC!**
+3.  **Closing a nil channel** -> **PANIC!**
+4.  **Reading from a closed channel** -> **Never blocks**, returns the **zero value** (e.g., `0`, `""`, `nil`) along with `ok == false`.
+5.  **Sending/Receiving from a `nil` channel** -> **Blocks forever!**
+
 
 
 
